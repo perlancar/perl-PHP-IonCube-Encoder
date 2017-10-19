@@ -144,3 +144,14 @@ sub ioncube_encode_php_or_zip {
 Perinci::CmdLine::Lite->new(
     url => '/main/ioncube_encode_php_or_zip',
 )->run;
+
+__DATA__
+
+ionCube PHP Encoder Evaluation Version 10.0 Enhancement 1
+Language Support: PHP 4, 5, 5.3, 5.4, 5.5, 5.6, 7.0, 7.1
+Copyright (c) 2002-2017 ionCube Ltd.
+0
+
+ionCube PHP Encoder Version 9.0 Enhancement 5
+Language Support: PHP 4, 5, 5.3, 5.4, 5.5, 5.6
+Copyright (c) 2002-2016 ionCube Ltd.

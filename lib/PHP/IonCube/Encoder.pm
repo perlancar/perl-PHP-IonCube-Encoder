@@ -1,19 +1,22 @@
-#!/usr/bin/env perl
+package PHP::IonCube::Reader;
 
-use 5.010;
+# DATE
+# VERSION
+
+use 5.010001;
 use strict;
 use warnings;
-use Log::Any '$log';
+use Log::ger;
 
 use File::Slurper qw(read_binary write_binary);
 use IPC::System::Options 'system', -log=>1;
-use Perinci::CmdLine::Lite;
 
 our %SPEC;
 
-$SPEC{ioncube_encode_php_or_zip} = {
+$SPEC{encode_with_ioncube} = {
     v => 1.1,
-    summary => 'Enkode file PHP tunggal atau ZIP berisi kumpulan file PHP',
+    summary => 'Encode single .php file or archive (.zip) '.
+        'containing .php files',
     args => {
         input_file => {
             schema => 'str*',
@@ -22,8 +25,9 @@ $SPEC{ioncube_encode_php_or_zip} = {
             pos => 0,
         },
         input_type => {
-            schema => ['str*', in=>['php', 'zip']],
-            default => 'php',
+            schema => ['str*', in=>['php', 'zip',
+                                    #'tar', 'tar.gz', 'tar.bz2', 'tar.xz',
+                                ]],
         },
         output_dir => {
             schema => 'str*',
@@ -31,21 +35,20 @@ $SPEC{ioncube_encode_php_or_zip} = {
             cmdline_aliases => {o=>{}},
         },
         php_version => {
-            schema => ['str*', in=>[qw/4 5 53 54 55 56/]],
+            schema => ['str*', in=>[qw/4 5 53 54 55 56 71/]],
             default => '53',
         },
         ioncube_encoder_path => {
-            schema  => 'str*',
-            #default => '/opt/ioncube/ioncube_encoder',
-            default => '/opt/ioncube/ioncube_encoder.sh',
+            schema  => 'filename*',
         },
-        encoder_version => {
-            schema  => ['str*', in=>[qw/7.0 8.3 9.0/]],
+        encoder_target_version => {
+            summary => 'What encoder version to target',
+            schema  => ['str*', in=>[qw/7.0 8.3 9.0 10.0/]],
             default => '9.0',
         },
     },
 };
-sub ioncube_encode_php_or_zip {
+sub encode_with_ioncube {
     require Archive::Zip; # i wanted Archive::Any, but it doesn't provide interface to create
     require File::Copy;
     require File::Path;
@@ -55,7 +58,44 @@ sub ioncube_encode_php_or_zip {
 
     my %args = @_;
 
-    my $encoder_version = $args{encoder_version} // '9.0';
+    my $encoder_path = $args{ioncube_encoder_path};
+    unless ($encoder_path) {
+        for my $dir (
+            "$ENV{HOME}/ioncube",
+            "/opt/ioncube",
+            "/usr/local/ioncube") {
+            if (-x "$dir/ioncube_encoder.sh") {
+                $encoder_path = "$dir/ioncube_encoder.sh";
+                last;
+            }
+        }
+    }
+    return [412, "Can't find ionCube encoder, please specify encoder_path"]
+        unless $encoder_path;
+    return [404, "No such encoder program: $encoder_path"]
+        unless $encoder_path;
+
+    # detect encoder program version & check encoder target version
+    my $encoder_actual_version;
+    system({shell=>0, capture_stdout=>\my $out, die=>1}, $encoder_path, "-V");
+    if ($out =~ /Version (\d+\.\d+)/) {
+        $encoder_actual_version = $1;
+    } else {
+        return [412, "Can't extract version from encoder (-V): response=$out"];
+    }
+    my $encoder_target_version = $args{encoder_target_version};
+    if ($encoder_actual_version eq '9.0') {
+        return [412, "Encoder program version 9.0 does not support ".
+                    "encoder target version 10.0"]
+            if $encoder_target_version eq '10.0';
+    } elsif ($encoder_actual_version eq '10.0') {
+        return [412, "Encoder program version 10.0 does not support ".
+                    "encoder target version 7.0"]
+            if $encoder_target_version eq '7.0';
+    } else {
+        return [412, "Unsupported encoder program version ".
+                    "($encoder_actual_version)"];
+    }
 
     my $input_file = $args{input_file};
     return [404, "No such input file: '$input_file'"] unless -f $input_file;
@@ -66,7 +106,6 @@ sub ioncube_encode_php_or_zip {
     }
     return [404, "No such output dir: '$output_dir'"] unless -d $output_dir;
 
-    my $encoder_path = $args{ioncube_encoder_path};
     my $php_version  = $args{php_version};
     my $code_encode = sub {
         my $path = shift;
@@ -75,10 +114,10 @@ sub ioncube_encode_php_or_zip {
         my @cmd = ("sudo", $encoder_path);
         push @cmd, "-$php_version";
 
-        $log->tracef("encoder version: %s", $encoder_version);
-        if ($encoder_version eq '8.3') {
+        $log->tracef("encoder version: %s", $encoder_target_version);
+        if ($encoder_target_version eq '8.3') {
             push @cmd, "-L";
-        } elsif ($encoder_version eq '7.0') {
+        } elsif ($encoder_target_version eq '7.0') {
             push @cmd, "-O";
         }
 
@@ -90,7 +129,7 @@ sub ioncube_encode_php_or_zip {
         } elsif (!-f($output_path)) {
             return [500, "Encode command succeeds, but no output was created",
                     undef, {"func.input_file"=>$path, "func.output_path"=>$output_path}];
-        } elsif ($args{input_type} eq 'php' && read_binary($output_path) !~ /ioncube/) {
+        } elsif ($input_type eq 'php' && read_binary($output_path) !~ /ioncube/) {
             return [500, "Encode command succeeds, but output doesn't seem encoded, perhaps there's a syntax error in the PHP source code",
                     undef, {"func.input_file"=>$path, "func.output_path"=>$output_path}];
         } else {
@@ -141,9 +180,13 @@ sub ioncube_encode_php_or_zip {
     $res;
 }
 
-Perinci::CmdLine::Lite->new(
-    url => '/main/ioncube_encode_php_or_zip',
-)->run;
+1;
+# ABSTRACT:
+
+=head1 TODO
+
+Support tarballs.
+
 
 __DATA__
 
